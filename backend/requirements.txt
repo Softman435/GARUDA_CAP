@@ -1,0 +1,14 @@
+# Tested Python versions: 3.10 - 3.12 (3.12 recommended). Python 3.13 is allowed but has had less testing.
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+python-multipart>=0.0.9
+sqlalchemy>=2.0,<3
+pydantic>=2.7,<3
+fonttools>=4.50
+
+# Speech recognition (runs locally on the CPU). Kept to a known-compatible range on purpose:
+# an unpinned "latest" version of these two can change behaviour between installs.
+# faster-whisper 1.1+ is needed for mixed-language detection (the "multilingual" option).
+faster-whisper>=1.1.1,<1.3
+ctranslate2>=4.5.0,<5
+numpy>=1.24

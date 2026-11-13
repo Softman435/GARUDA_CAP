@@ -1,0 +1,8 @@
+transformers>=4.40
+datasets[audio]>=2.19
+accelerate>=0.30
+evaluate
+jiwer
+soundfile
+librosa
+ctranslate2>=4.5,<5

@@ -1,0 +1,19 @@
+# secrets and local data
+.env
+*.pem
+*.key
+credentials*.json
+data/
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+# node
+node_modules/
+frontend/dist/
+# model caches (large)
+backend/models/
+# downloaded/system fonts copied by setup (not redistributable)
+backend/fonts/Nirmala*.ttf
+backend/fonts/Nirmala*.ttc

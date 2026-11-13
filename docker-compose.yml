@@ -1,0 +1,14 @@
+# UNTESTED: see Dockerfile. Starts the app on http://localhost:8000 and keeps data in a Docker volume.
+services:
+  garuda:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"   # only this computer can reach it
+    environment:
+      APP_ENV: development
+      WHISPER_MODEL: small
+      MAX_UPLOAD_MB: "2048"
+    volumes:
+      - garuda-data:/data
+volumes:
+  garuda-data:
