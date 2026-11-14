@@ -195,6 +195,7 @@ def _romanize_kanglish_result(result: dict) -> dict:
     return result
 
 LOG_HINT = "The technical details were saved in data\\logs\\garuda.log."
+MAX_WORD_DURATION_S = 5.0
 
 
 class TranscribeError(Exception):
@@ -281,6 +282,9 @@ def plan_options(
         # Reading the previous text back in is the main cause of endless repetition on hard audio.
         "condition_on_previous_text": False,
     }
+    if vad_filter:
+        # Preserve quiet word beginnings/endings at the edge of detected speech regions.
+        options["vad_parameters"] = {"speech_pad_ms": 1000}
     vocab = vocab_prompt(vocabulary)
     if kannada_only_model and language in ("auto", MIXED):
         # A model fine-tuned only on Kannada cannot detect languages reliably: Kannada is forced.
@@ -488,33 +492,49 @@ def consume_segments(segments, *, total: float, want_words: bool, cancel: thread
     caption. A segment whose words cannot all be trusted keeps honest PHRASE-level timing instead.
     """
     out: list[dict] = []
-    stats = {"phrase_segments": 0, "dropped": 0}
+    stats = {"phrase_segments": 0, "dropped": 0, "filtered": 0, "unicode_replacements": 0}
     for seg in segments:  # the library does the real decoding lazily, inside this loop
         if cancel.is_set():
             raise Cancelled()
         text = getattr(seg, "text", None)
-        text = " ".join(text.split()) if isinstance(text, str) else ""
+        text = text if isinstance(text, str) else ""
+        text_replacements = text.count("\ufffd")
+        text = " ".join(text.replace("\ufffd", "").split())
+        symbol_only_text = bool(text) and not any(char.isalnum() for char in text)
+        if symbol_only_text:
+            text = ""
         start, end = _num(getattr(seg, "start", None)), _num(getattr(seg, "end", None))
 
-        good, spoken = [], 0
+        good, spoken, word_replacements = [], 0, 0
         for w in ((getattr(seg, "words", None) or []) if want_words else []):
             token = getattr(w, "word", None)
             token = token.strip() if isinstance(token, str) else ""
-            if not token:
+            word_replacements += token.count("\ufffd")
+            token = token.replace("\ufffd", "").strip()
+            if not token or not any(char.isalnum() for char in token):
                 continue
             spoken += 1
             ws, we = _num(getattr(w, "start", None)), _num(getattr(w, "end", None))
-            if ws is not None and we is not None and ws >= 0 and we > ws:
+            if (ws is not None and we is not None and ws >= 0 and we > ws
+                    and we - ws <= MAX_WORD_DURATION_S):
                 prob = _num(getattr(w, "probability", None))
                 good.append({"text": token, "start": round(ws, 3), "end": round(we, 3), "kind": "word",
                              "confidence": None if prob is None else round(min(max(prob, 0.0), 1.0), 3)})
         if good and len(good) == spoken:
+            stats["unicode_replacements"] += word_replacements
             out.extend(good)
         elif text and start is not None and end is not None and start >= 0 and end > start:
+            stats["unicode_replacements"] += text_replacements
             stats["phrase_segments"] += 1  # alignment missing or incomplete: keep real phrase timing only
             out.append({"text": text, "start": round(start, 3), "end": round(end, 3), "kind": "phrase", "confidence": None})
         elif text:
+            stats["unicode_replacements"] += text_replacements
             stats["dropped"] += 1
+        elif symbol_only_text and not good:
+            stats["unicode_replacements"] += text_replacements
+            stats["filtered"] += 1
+        else:
+            stats["unicode_replacements"] += max(text_replacements, word_replacements)
         if end is not None:
             try:
                 progress(min(0.99, end / total))
@@ -678,6 +698,11 @@ def transcribe(
                         "unavailable for them). Their timing is real but not per word.")
     if stats["dropped"]:
         warnings.append(f"{stats['dropped']} piece(s) of text were left out because their timestamps were invalid.")
+    if stats["filtered"]:
+        warnings.append(f"{stats['filtered']} caption segment(s) containing only symbols were ignored.")
+    if stats["unicode_replacements"]:
+        warnings.append(f"Removed {stats['unicode_replacements']} invalid Unicode replacement character(s) from "
+                        "recognized captions. Please review the affected text.")
     if language == KANGLISH:
         warnings.append("Kanglish converts Kannada script to uppercase Latin letters. This is a pronunciation-style "
                         "transliteration, not translation; review names and spelling.")

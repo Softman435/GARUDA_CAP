@@ -58,6 +58,10 @@ Kanglish changes the script after recognition; it cannot correct words the speec
 Word timing comes from faster-whisper's own alignment; where it fails the caption keeps honest **phrase-level** timing
 (marked "phrase") and is never presented as word-level. WhisperX (a stronger aligner) is not used because it needs
 PyTorch, which is too heavy for this CPU-only design.
+Voice-activity detection pads speech boundaries by one second to help retain quiet words at clip edges, and
+symbol-only output segments and invalid Unicode replacement characters are discarded (with a warning for the latter).
+Implausibly long word alignments fall back to phrase-level timing. These safeguards cannot recover speech that is
+missing or unclear in the audio; review the transcript before export.
 
 ### Models (CPU laptop, 16 GB RAM)
 | Model | RAM | Speed on a CPU | Notes |

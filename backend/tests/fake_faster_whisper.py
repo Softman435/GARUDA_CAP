@@ -65,10 +65,11 @@ class FakeWhisperModel:
                                                 local_files_only=local_files_only))
 
     def transcribe(self, audio, language=None, task="transcribe", beam_size=5, word_timestamps=False,
-                   vad_filter=False, condition_on_previous_text=True, initial_prompt=None, multilingual=False):
+                   vad_filter=False, condition_on_previous_text=True, initial_prompt=None, multilingual=False,
+                   vad_parameters=None):
         options = dict(audio=audio, language=language, task=task, beam_size=beam_size, word_timestamps=word_timestamps,
                        vad_filter=vad_filter, condition_on_previous_text=condition_on_previous_text,
-                       initial_prompt=initial_prompt, multilingual=multilingual)
+                       initial_prompt=initial_prompt, multilingual=multilingual, vad_parameters=vad_parameters)
         FakeWhisperModel.transcribe_calls.append(options)
         return FakeWhisperModel.behavior(options)
 
@@ -84,9 +85,11 @@ def install(behavior=None, init_error=None, drop_multilingual=False):
     if drop_multilingual:           # simulates an OLDER faster-whisper without `multilingual`
         class Older(FakeWhisperModel):
             def transcribe(self, audio, language=None, task="transcribe", beam_size=5, word_timestamps=False,
-                           vad_filter=False, condition_on_previous_text=True, initial_prompt=None):
+                           vad_filter=False, condition_on_previous_text=True, initial_prompt=None,
+                           vad_parameters=None):
                 return FakeWhisperModel.transcribe(self, audio, language, task, beam_size, word_timestamps, vad_filter,
-                                                   condition_on_previous_text, initial_prompt)
+                                                   condition_on_previous_text, initial_prompt,
+                                                   vad_parameters=vad_parameters)
         model_cls = Older
     module.WhisperModel = model_cls
     previous = sys.modules.get("faster_whisper")

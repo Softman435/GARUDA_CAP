@@ -74,6 +74,9 @@ class PlanOptionsMocked(unittest.TestCase):
             self.assertEqual(options["beam_size"], 3)
             self.assertIs(options["word_timestamps"], True)
             self.assertNotIn("initial_prompt", options)
+            self.assertEqual(options["vad_parameters"], {"speech_pad_ms": 1000})
+        without_vad, _ = tr.plan_options("kn", beam_size=3, word_timestamps=True, vad_filter=False)
+        self.assertNotIn("vad_parameters", without_vad)
 
     def test_mixed_mode_detects_per_window_and_uses_a_mixed_prompt(self):
         options, warnings = tr.plan_options("kn-en", beam_size=3, word_timestamps=True, vad_filter=True)
@@ -153,6 +156,29 @@ class SegmentValidationMocked(unittest.TestCase):
         words, _ = self.consume([fw.seg("only phrase", 0.5, 2.5, None)])
         self.assertEqual([(w["kind"], w["start"], w["end"]) for w in words], [("phrase", 0.5, 2.5)])
 
+    def test_symbol_only_segments_and_word_tokens_are_filtered(self):
+        words, stats = self.consume([
+            fw.seg("!!! ♪", 0.5, 1.0, [fw.Word(0.5, 1.0, " ♪", 0.9)]),
+            fw.seg("ನಮಸ್ಕಾರ", 1.0, 1.5, [fw.Word(1.0, 1.5, "ನಮಸ್ಕಾರ", 0.9)]),
+        ])
+        self.assertEqual([word["text"] for word in words], ["ನಮಸ್ಕಾರ"])
+        self.assertEqual(stats["filtered"], 1)
+
+    def test_unicode_replacement_characters_are_removed_from_caption_text(self):
+        words, stats = self.consume([fw.seg("ನಮಸ್ಕಾರ\ufffd", 0.5, 1.5, None)])
+        self.assertEqual([word["text"] for word in words], ["ನಮಸ್ಕಾರ"])
+        self.assertEqual(stats["unicode_replacements"], 1)
+
+    def test_implausibly_long_word_timing_falls_back_to_phrase_timing(self):
+        words, stats = self.consume([
+            fw.seg("a phrase", 1.0, 9.0, [fw.Word(1.0, 9.0, " a phrase", 0.9)])
+        ], total=10.0)
+        self.assertEqual(
+            [(word["kind"], word["text"], word["start"], word["end"]) for word in words],
+            [("phrase", "a phrase", 1.0, 9.0)],
+        )
+        self.assertEqual(stats["phrase_segments"], 1)
+
     def test_timestamps_are_clamped_inside_the_audio_and_sorted(self):
         words, stats = self.consume([fw.seg("late", 50.0, 51.0, None), fw.seg("b", 2.0, 3.0, None), fw.seg("a", 1.0, 1.5, None),
                                      fw.seg("edge", 9.9, 12.0, None)], total=10.0)
@@ -193,6 +219,7 @@ class TranscribeFunctionMocked(Base):
         self.assertTrue(call["multilingual"])
         self.assertEqual(call["task"], "transcribe")
         self.assertTrue(call["word_timestamps"] and call["vad_filter"])
+        self.assertEqual(call["vad_parameters"], {"speech_pad_ms": 1000})
         import numpy as np
         self.assertIsInstance(call["audio"], np.ndarray, "audio is passed as an array so PyAV is never used")
         self.assertEqual(call["audio"].dtype, np.float32)
@@ -238,6 +265,12 @@ class TranscribeFunctionMocked(Base):
             result = self.run_tr(language="kn-en")
         self.assertEqual(model.transcribe_calls[0]["language"], "kn")
         self.assertTrue(any("Update faster-whisper" in w for w in result["warnings"]))
+
+    def test_unicode_replacement_characters_are_removed_and_reported(self):
+        with fw.install(lambda options: ([fw.seg("ನಮಸ್ಕಾರ\ufffd", 0.0, 2.0)], fw.info("kn", 2.0))):
+            result = self.run_tr()
+        self.assertEqual(result["words"][0]["text"], "ನಮಸ್ಕಾರ")
+        self.assertTrue(any("replacement character" in warning for warning in result["warnings"]))
 
     # ---- the failure the user reported -------------------------------------------------------------
     def test_TypeError_inside_the_library_triggers_phrase_fallback_and_is_logged_with_traceback(self):
